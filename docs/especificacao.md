@@ -13,10 +13,10 @@ O Finance Assistant existe hoje como aplicação desktop (Python/Streamlit + SQL
 ## 2. Objetivos
 
 1. Consultar Dashboard, Análise, Património, Investimentos e FIRE em qualquer dispositivo Android, com o PC desligado.
-2. Dados sempre sincronizáveis a partir do `finance.db` no OneDrive, com um toque ("Actualizar dados").
+2. Dados sempre atualizáveis a partir do `finance.db`, com um toque ("Actualizar dados"). Na v1 isto é uma importação manual do ficheiro a partir do dispositivo (ver §5); a sincronização automática a partir do OneDrive via Microsoft Graph é a evolução prevista, atrás de uma flag.
 3. Zero infraestrutura própria: sem servidor, sem backend, sem custos recorrentes.
-4. Privacidade total: os dados circulam apenas entre o OneDrive do Diogo e o dispositivo — nunca por servidores de terceiros.
-5. Funcionamento offline após a primeira sincronização (cache local do `finance.db`).
+4. Privacidade total: os dados nunca saem do dispositivo do Diogo (v1) ou circulam apenas entre o OneDrive e o dispositivo (evolução) — nunca por servidores de terceiros.
+5. Funcionamento offline após a primeira importação/sincronização (cache local do `finance.db`).
 
 ## 3. Não-objetivos
 
@@ -27,6 +27,24 @@ O Finance Assistant existe hoje como aplicação desktop (Python/Streamlit + SQL
 - **AI Insights na v1** — considerado para fase posterior (ver §10).
 
 ## 4. Arquitetura
+
+**v1 (atual) — importação manual, sem autenticação:**
+
+```
+┌─────────────┐   ETL semanal    ┌──────────────────┐
+│  PC (atual)  │ ───────────────▶ │ finance.db        │
+│  Streamlit   │                  │ (ficheiro local)   │
+│  + ETL       │                  └────────┬─────────┘
+└─────────────┘                            │ transferência manual
+                                            │ (AirDrop/USB/cloud à escolha)
+                                   ┌────────▼─────────┐
+                                   │ PWA no dispositivo │
+                                   │ React + sql.js     │
+                                   │ cache: IndexedDB   │
+                                   └──────────────────┘
+```
+
+**Evolução prevista — sincronização automática via OneDrive:**
 
 ```
 ┌─────────────┐   ETL semanal    ┌──────────────────┐
@@ -43,19 +61,22 @@ O Finance Assistant existe hoje como aplicação desktop (Python/Streamlit + SQL
                                  └──────────────────┘
 ```
 
+A app já traz o código MSAL/Graph pronto (atrás da flag `VITE_AUTH_ENABLED`, `false` por omissão) — a evolução é apenas: fazer o registo Entra ID, preencher `VITE_MSAL_CLIENT_ID` e ligar a flag. Nenhuma reescrita de arquitetura é necessária.
+
 | Camada | Tecnologia | Notas |
 |---|---|---|
 | Frontend | React 18 + Vite + TypeScript | Base gerada/iterada no Google AI Studio |
 | UI | Material Design 3 (MUI ou similar) | PT-PT em toda a interface; dark mode |
 | Gráficos | Recharts | Replicar os gráficos Plotly do desktop |
-| Autenticação | MSAL.js (`@azure/msal-browser`) | Conta Microsoft pessoal; fluxo PKCE |
-| Dados remotos | Microsoft Graph API | `GET /me/drive/root:/FinanceAssistant_Data/finance.db:/content` |
+| Importação de dados (v1) | `<input type="file">` + validação do cabeçalho SQLite | Sem autenticação; ver §5 |
+| Autenticação (evolução) | MSAL.js (`@azure/msal-browser`) | Desativada por omissão (`VITE_AUTH_ENABLED=false`); conta Microsoft pessoal, fluxo PKCE |
+| Dados remotos (evolução) | Microsoft Graph API | `GET /me/drive/root:/FinanceAssistant_Data/finance.db:/content` |
 | Motor SQL | sql.js (SQLite compilado para WebAssembly) | As queries SQL atuais portam quase sem alterações |
-| Cache local | IndexedDB | Guarda o `.db` + data de sincronização; permite offline |
+| Cache local | IndexedDB | Guarda o `.db` + nome do ficheiro + data de importação/sincronização; permite offline |
 | Alojamento | GitHub Pages (repo privado, Pages público*) | Deploy = `git push`; sem servidor |
 | PWA | manifest + service worker (vite-plugin-pwa) | Instalável como ícone no ecrã inicial |
 
-\* A página é pública mas **não contém dados** — apenas código; os dados exigem sempre login Microsoft.
+\* A página é pública mas **não contém dados** — apenas código; os dados só existem no dispositivo depois de importados (v1) ou após login Microsoft (evolução).
 
 ### Princípios herdados do desktop
 
@@ -64,13 +85,25 @@ O Finance Assistant existe hoje como aplicação desktop (Python/Streamlit + SQL
 - **Fixo/variável só fiável de 2018 em diante**; legacy 2015–2017 apresentado com aviso.
 - Separação limpa entre camada de dados (queries SQL) e camada de apresentação.
 
-## 5. Fluxo de autenticação e sincronização
+## 5. Fluxo de dados
 
-1. **Registo único (uma vez, pode ser feito no browser do tablet):** criar App Registration no Microsoft Entra ID (portal.azure.com) — tipo "contas pessoais Microsoft", plataforma SPA, redirect URI = URL do GitHub Pages, scopes delegados `User.Read` e `Files.Read`. Guardar o `clientId` na config da app.
-2. **Primeiro arranque:** ecrã de login → popup/redirect Microsoft → token guardado pelo MSAL (silent refresh nas visitas seguintes).
-3. **Sincronização:** botão "🔄 Actualizar dados" (paridade com o desktop) → download do `finance.db` via Graph → gravação em IndexedDB → recarregamento do sql.js.
-4. **Indicador de frescura:** cabeçalho mostra "Dados de DD/MM/AAAA HH:mm" (data de modificação do ficheiro no OneDrive, obtida dos metadados Graph antes do download — permite também *skip* do download se não houver versão nova).
-5. **Offline:** sem rede, a app abre com a última cópia em cache e assinala "modo offline".
+### v1 — importação manual (fluxo atual, sem autenticação)
+
+1. **Primeira utilização:** sem nenhum `.db` em cache, a app mostra o ecrã "Importar dados" — explica em PT-PT que o `finance.db` é gerado no PC (ETL semanal) e pede para escolher o ficheiro no dispositivo.
+2. **Validação:** o ficheiro escolhido é validado (cabeçalho SQLite) antes de ser aberto; ficheiro inválido/corrompido mostra um erro amigável e não mexe nos dados já em cache, se existirem.
+3. **Cache manda:** o `.db` importado fica em IndexedDB junto com nome do ficheiro e data/hora de importação. Em utilizações seguintes, havendo cache válida, a app abre directamente no Dashboard — o ecrã de importação não volta a aparecer sozinho.
+4. **Reimportar:** o botão "🔄 Actualizar dados" no cabeçalho abre sempre o seletor de ficheiro nativo, para trazer uma versão mais recente do `finance.db` (transferido do PC por AirDrop, USB, cloud, etc., à escolha do utilizador).
+5. **Indicador de frescura:** cabeçalho mostra "Dados de DD/MM/AAAA HH:mm" + nome do ficheiro importado; um aviso discreto aparece quando os dados têm mais de 8 dias (a atualização no PC é semanal).
+6. **Offline:** por não haver rede envolvida nesta importação, a app funciona sempre com a última cópia em cache — o aviso "offline" existe apenas para assinalar falta de ligação (ex.: para a evolução com Graph).
+
+### Evolução prevista — sincronização automática via OneDrive
+
+Todo o código já existe atrás de `VITE_AUTH_ENABLED` (ver §4). Quando ativado:
+
+1. **Registo único (uma vez, pode ser feito no browser do tablet):** criar App Registration no Microsoft Entra ID (portal.azure.com) — tipo "contas pessoais Microsoft" (ou multi-tenant, consoante `VITE_MSAL_AUTHORITY`), plataforma SPA, redirect URI = URL do GitHub Pages, scopes delegados `User.Read` e `Files.Read`. Guardar o `clientId` em `VITE_MSAL_CLIENT_ID`.
+2. **Primeiro arranque:** ecrã de login → popup Microsoft → token guardado pelo MSAL (silent refresh nas visitas seguintes).
+3. **Sincronização:** botão "🔄 Actualizar dados" passa a descarregar o `finance.db` via Graph em vez de abrir o seletor de ficheiro → gravação em IndexedDB → recarregamento do sql.js. Salta o download se os metadados Graph indicarem a mesma versão já em cache.
+4. **Offline:** sem rede, a app abre com a última cópia em cache e assinala "modo offline".
 
 ## 6. Módulos e requisitos
 
@@ -78,7 +111,7 @@ O Finance Assistant existe hoje como aplicação desktop (Python/Streamlit + SQL
 
 | Módulo | Conteúdo mínimo |
 |---|---|
-| **Autenticação + Sync** | Login Microsoft, download/cache do `finance.db`, indicador de frescura, offline |
+| **Importação + dados** | Importação manual do `finance.db` (v1), validação do ficheiro, cache/indicador de frescura, offline. Sincronização Microsoft (login + download automático) fica pronta atrás de flag, para ativar mais tarde |
 | **Dashboard (Visão Geral)** | KPIs principais com tooltips de breakdown (incl. imobiliário), gráfico de evolução mensal/anual |
 | **Análise** | Despesas por grupo/rubrica, fixo vs. variável (2018+), filtros de período |
 | **Património** | Valor líquido, imóveis, veículos (Volvo EX30, Renault ESPACE), contas líquidas |
@@ -112,12 +145,13 @@ Critérios de aceitação transversais (P0):
 finance-assistant-mobile/
 ├── public/               # manifest, ícones PWA
 ├── src/
-│   ├── auth/             # MSAL config + hooks (useAuth)
+│   ├── auth/             # MSAL config + hooks (useAuth) — desativado por omissão (evolução)
 │   ├── data/
-│   │   ├── graph.ts      # download finance.db + metadados
-│   │   ├── db.ts         # init sql.js, cache IndexedDB
-│   │   └── queries/      # SQL portado do desktop, 1 ficheiro por módulo
-│   ├── components/       # KPICard, ChartCard, PeriodFilter, ...
+│   │   ├── graph.ts             # download finance.db + metadados (evolução, atrás de flag)
+│   │   ├── db.ts                 # init sql.js, validação SQLite, cache IndexedDB
+│   │   ├── ImportFileContext.tsx # seletor de ficheiro partilhado (importação v1)
+│   │   └── queries/              # SQL portado do desktop, 1 ficheiro por módulo
+│   ├── components/       # KPICard, ImportScreen, Header, BottomNav, ...
 │   ├── pages/            # Dashboard, Analise, Patrimonio, Investimentos, Fire
 │   ├── theme/            # MD3, PT-PT locale, formatação € e datas
 │   └── App.tsx           # navegação inferior (bottom nav) + router
@@ -137,7 +171,7 @@ Desenvolvimento via **Claude Code ligado ao repo GitHub** (possível a partir do
 ## 9. Questões em aberto
 
 - **Bloqueante — tamanho do `finance.db`:** confirmar o tamanho atual (MB). sql.js carrega a base inteira em memória; até ~50 MB é confortável em qualquer dispositivo recente. *(Responder: Diogo, no PC ou via OneDrive.)*
-- **Bloqueante — App Registration com conta pessoal:** confirmar que a conta OneDrive é Microsoft pessoal (não corporativa), o que define o `authority` do MSAL. *(Responder: Diogo.)*
+- Adiado (não bloqueia a v1) — App Registration no Entra ID: registo fica para quando se quiser ativar a sincronização automática via OneDrive; até lá, `VITE_AUTH_ENABLED=false` e a app usa importação manual (§5). Quando avançar, confirmar se a conta é Microsoft pessoal (`VITE_MSAL_AUTHORITY=consumers`) ou mista (`common`).
 - Não bloqueante — inventário exato das queries do desktop a portar (extrair do repo `FinanceAssistant`).
 - Não bloqueante — nome/ícone da PWA e URL final do GitHub Pages.
 
@@ -147,5 +181,7 @@ Desenvolvimento via **Claude Code ligado ao repo GitHub** (possível a partir do
 |---|---|
 | `finance.db` demasiado grande para sql.js | Fase 1 testa com o ficheiro real logo no início; plano B: exportar do desktop um `.db` reduzido só com tabelas de consulta |
 | Divergência de resultados vs. desktop | Validação lado a lado por módulo antes de dar por concluído |
-| Fricção no registo Entra ID | Passo único e documentado; pode ser feito no browser do tablet |
-| Token Graph expirado offline | Cache IndexedDB garante consulta mesmo sem login renovado |
+| Esquecer-se de importar uma versão nova do `finance.db` | Aviso discreto no cabeçalho quando os dados têm mais de 8 dias |
+| Ficheiro errado/corrompido na importação manual | Validação do cabeçalho SQLite antes de abrir; erro amigável sem perder os dados já em cache |
+| Fricção no registo Entra ID (quando avançar para a evolução) | Passo único e documentado; pode ser feito no browser do tablet; até lá não bloqueia a v1 |
+| Token Graph expirado offline (evolução) | Cache IndexedDB garante consulta mesmo sem login renovado |
