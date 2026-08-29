@@ -1,0 +1,29 @@
+node_modules
+dist
+dist-ssr
+*.local
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# editores
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ambiente
+.env
+.env.local
+
+# nunca commitar a base de dados real
+*.db
+*.sqlite
+*.sqlite3
