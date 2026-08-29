@@ -72,7 +72,8 @@ A app já traz o código MSAL/Graph pronto (atrás da flag `VITE_AUTH_ENABLED`, 
 | Autenticação (evolução) | MSAL.js (`@azure/msal-browser`) | Desativada por omissão (`VITE_AUTH_ENABLED=false`); conta Microsoft pessoal, fluxo PKCE |
 | Dados remotos (evolução) | Microsoft Graph API | `GET /me/drive/root:/FinanceAssistant_Data/finance.db:/content` |
 | Motor SQL | sql.js (SQLite compilado para WebAssembly) | As queries SQL atuais portam quase sem alterações |
-| Cache local | IndexedDB | Guarda o `.db` + nome do ficheiro + data de importação/sincronização; permite offline |
+| Configuração de património (opcional) | `finance_config.json` + `JSON.parse` validado | Segunda fonte de dados, só para imóveis/veículos (`property_config`, `patrimonio_config.veiculos`) — não existem no `finance.db`; ver §5 |
+| Cache local | IndexedDB | Guarda o `.db` + o config (quando importado) + nomes de ficheiro + datas de importação/sincronização; permite offline |
 | Alojamento | GitHub Pages (repo privado, Pages público*) | Deploy = `git push`; sem servidor |
 | PWA | manifest + service worker (vite-plugin-pwa) | Instalável como ícone no ecrã inicial |
 
@@ -80,9 +81,10 @@ A app já traz o código MSAL/Graph pronto (atrás da flag `VITE_AUTH_ENABLED`, 
 
 ### Princípios herdados do desktop
 
-- **Philosophy B**: fluxos do imobiliário (5L, 7D, 7E) isolados dos KPIs pessoais; Dashboard Visão Geral com `include_imob=True`; KPIs Avançados apenas pessoais; acertos como abatimento de despesa.
+- **Philosophy B**: fluxos do imobiliário (5L, 7D, 7E — arrendados; PL é a habitação própria, fora deste grupo) isolados dos KPIs pessoais; Dashboard Visão Geral com `include_imob=True`; KPIs Avançados apenas pessoais; acertos como abatimento de despesa.
 - **Flags de schema respeitadas**: `is_poupanca` (ex.: `R.Empréstimo Volvo` neutro em todos os cálculos), `is_controlo`, `is_imobiliario`, `is_fixa` + `frequencia`.
 - **Fixo/variável só fiável de 2018 em diante**; legacy 2015–2017 apresentado com aviso.
+- **Imóveis e veículos não têm valor no `finance.db`** — vêm do `finance_config.json` (`property_config`, `patrimonio_config.veiculos`); sem passivos registados em nenhuma fonte, o total combinado do Património é sempre "ativos brutos", nunca "valor líquido".
 - Separação limpa entre camada de dados (queries SQL) e camada de apresentação.
 
 ## 5. Fluxo de dados
@@ -95,6 +97,15 @@ A app já traz o código MSAL/Graph pronto (atrás da flag `VITE_AUTH_ENABLED`, 
 4. **Reimportar:** o botão "🔄 Actualizar dados" no cabeçalho abre sempre o seletor de ficheiro nativo, para trazer uma versão mais recente do `finance.db` (transferido do PC por AirDrop, USB, cloud, etc., à escolha do utilizador).
 5. **Indicador de frescura:** cabeçalho mostra "Dados de DD/MM/AAAA HH:mm" + nome do ficheiro importado; um aviso discreto aparece quando os dados têm mais de 8 dias (a atualização no PC é semanal).
 6. **Offline:** por não haver rede envolvida nesta importação, a app funciona sempre com a última cópia em cache — o aviso "offline" existe apenas para assinalar falta de ligação (ex.: para a evolução com Graph).
+
+### Configuração de património (finance_config.json, opcional)
+
+O `finance.db` não tem o valor de mercado de imóveis nem de veículos — só a app desktop guarda isso, no `finance_config.json` (`property_config` para imóveis, `patrimonio_config.veiculos` para veículos; o ficheiro tem outros campos como `budgets`/`preferences` que a PWA ignora).
+
+1. **Totalmente opcional:** sem este ficheiro, o Património funciona à mesma — mostra "Sem dados de origem" nos cartões de imóveis/veículos, com um botão para importar.
+2. **Importação:** mesmo padrão do `finance.db` — seletor de ficheiro nativo, validado (JSON bem formado + tem `property_config` ou `patrimonio_config`) antes de ser aceite; erro amigável em caso de ficheiro errado, sem mexer na configuração já em cache.
+3. **Cache:** guardado em IndexedDB (loja separada da do `finance.db`); reaberto automaticamente nas visitas seguintes.
+4. **Atualizar:** botão dedicado no Património reabre o seletor de ficheiro para trazer uma versão mais recente.
 
 ### Evolução prevista — sincronização automática via OneDrive
 
@@ -114,9 +125,9 @@ Todo o código já existe atrás de `VITE_AUTH_ENABLED` (ver §4). Quando ativad
 | **Importação + dados** | Importação manual do `finance.db` (v1), validação do ficheiro, cache/indicador de frescura, offline. Sincronização Microsoft (login + download automático) fica pronta atrás de flag, para ativar mais tarde |
 | **Dashboard (Visão Geral)** | KPIs principais com tooltips de breakdown (incl. imobiliário), gráfico de evolução mensal/anual |
 | **Análise** | Despesas por grupo/rubrica, fixo vs. variável (2018+), filtros de período |
-| **Património** | Valor líquido, imóveis, veículos (Volvo EX30, Renault ESPACE), contas líquidas |
+| **Património** | Ativos brutos: contas líquidas + investimentos (`finance.db`), imóveis e veículos (`finance_config.json`, opcional). Distingue habitação própria de imóveis de arrendamento. Sem passivos em nenhuma fonte — nunca apresentado como "valor líquido" |
 | **Investimentos** | Portfólio total (soma dos valores mais recentes na data global mais recente), estado ativo/terminado |
-| **FIRE** | Trajetória, taxa de cobertura de despesas por rendimento passivo (Barista FIRE) |
+| **FIRE** | Trajetória e taxa de cobertura de despesas pessoais por rendimento passivo (Barista FIRE). Rendimento passivo inclui o líquido do imobiliário de arrendamento (rendas − despesas, acertos de inquilinos como abatimento de despesa) + R.Investimentos — ao contrário da Análise, o FIRE não exclui o imobiliário (Philosophy B separa os fluxos para não distorcer os KPIs pessoais, não para os ignorar sempre) |
 
 Critérios de aceitação transversais (P0):
 - [ ] Todos os valores batem certo com o desktop para o mesmo `finance.db` (validação lado a lado)
@@ -147,10 +158,13 @@ finance-assistant-mobile/
 ├── src/
 │   ├── auth/             # MSAL config + hooks (useAuth) — desativado por omissão (evolução)
 │   ├── data/
-│   │   ├── graph.ts             # download finance.db + metadados (evolução, atrás de flag)
-│   │   ├── db.ts                 # init sql.js, validação SQLite, cache IndexedDB
-│   │   ├── ImportFileContext.tsx # seletor de ficheiro partilhado (importação v1)
-│   │   └── queries/              # SQL portado do desktop, 1 ficheiro por módulo
+│   │   ├── graph.ts               # download finance.db + metadados (evolução, atrás de flag)
+│   │   ├── db.ts                   # init sql.js, validação SQLite, cache IndexedDB
+│   │   ├── ImportFileContext.tsx   # seletor de ficheiro partilhado (finance.db)
+│   │   ├── configFile.ts           # parsing/validação do finance_config.json (opcional)
+│   │   ├── ConfigContext.tsx       # cache/estado do finance_config.json
+│   │   ├── ConfigFileContext.tsx   # seletor de ficheiro partilhado (finance_config.json)
+│   │   └── queries/                # SQL portado do desktop, 1 ficheiro por módulo
 │   ├── components/       # KPICard, ImportScreen, Header, BottomNav, ...
 │   ├── pages/            # Dashboard, Analise, Patrimonio, Investimentos, Fire
 │   ├── theme/            # MD3, PT-PT locale, formatação € e datas

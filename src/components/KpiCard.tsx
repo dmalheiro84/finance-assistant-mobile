@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
 interface KpiCardProps {
   label: string;
   value: string;
-  color?: 'success.main' | 'error.main' | 'text.primary';
+  color?: 'success.main' | 'error.main' | 'text.primary' | 'text.disabled';
   tooltip?: ReactNode;
 }
 

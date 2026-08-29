@@ -14,12 +14,22 @@ const numberFormatter = new Intl.NumberFormat('pt-PT', {
   maximumFractionDigits: 1,
 });
 
+const percentFormatter = new Intl.NumberFormat('pt-PT', {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
+});
+
 export function formatCurrency(value: number): string {
   return currencyFormatter.format(value);
 }
 
 export function formatNumber(value: number): string {
   return numberFormatter.format(value);
+}
+
+/** @param value já em percentagem (ex.: 24.3, não 0.243) */
+export function formatPercent(value: number): string {
+  return `${percentFormatter.format(value)}%`;
 }
 
 export function formatDate(date: Date): string {
