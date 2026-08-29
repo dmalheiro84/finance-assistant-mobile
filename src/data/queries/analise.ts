@@ -1,4 +1,5 @@
 import { query } from '../db';
+import { CATEGORIAS_DESPESA_DE_CAPITAL } from './despesasDeCapital';
 
 // Queries do módulo Análise, sobre a tabela `transactions`.
 //
@@ -7,6 +8,9 @@ import { query } from '../db';
 //     Confirmado no schema real: is_imobiliario=1 coincide exatamente com
 //     grupo_principal='Imobiliário' (868/868 linhas).
 //   - Exclui sempre is_poupanca=1 e is_controlo=1 (mesma regra do Dashboard).
+//   - Exclui despesas de capital pontuais (ver despesasDeCapital.ts) —
+//     confirmado com o utilizador: distorcem a análise de custo de vida
+//     corrente. O Dashboard não aplica esta exclusão.
 //   - Breakdown fixo/variável só é fiável de 2018 em diante: confirmado que
 //     `frequencia`/`is_fixa` são sempre NULL/0 antes de 2018 (dados legacy
 //     sem esta classificação) — por isso qualquer período que inclua anos
@@ -14,7 +18,7 @@ import { query } from '../db';
 //     apresentar os valores como fiáveis.
 //   - `categoria_normalizada` é a rubrica; `grupo_principal` é o grupo.
 
-const FILTRO_BASE = `tipo = 'Despesa' AND is_imobiliario = 0 AND is_poupanca = 0 AND is_controlo = 0`;
+const FILTRO_BASE = `tipo = 'Despesa' AND is_imobiliario = 0 AND is_poupanca = 0 AND is_controlo = 0 AND categoria_normalizada NOT IN (${CATEGORIAS_DESPESA_DE_CAPITAL})`;
 
 export interface ExpenseByGroup {
   grupo: string;

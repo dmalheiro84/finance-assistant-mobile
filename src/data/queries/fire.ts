@@ -1,4 +1,5 @@
 import { query } from '../db';
+import { CATEGORIAS_DESPESA_DE_CAPITAL } from './despesasDeCapital';
 
 // Queries do módulo FIRE — trajetória e taxa de cobertura de despesas
 // por rendimento passivo (Barista FIRE).
@@ -20,7 +21,10 @@ import { query } from '../db';
 // como receita inflacionaria artificialmente o rendimento passivo.
 //
 // Despesas de referência = despesas pessoais (a mesma base do módulo
-// Análise): exclui imobiliário, poupança e controlo.
+// Análise): exclui imobiliário, poupança, controlo e despesas de
+// capital pontuais (ver despesasDeCapital.ts) — confirmado com o
+// utilizador que uma compra de casa não é despesa de vida corrente e
+// distorcia a taxa de cobertura do ano em que aconteceu.
 
 export interface FireYearData {
   ano: number;
@@ -48,7 +52,7 @@ export function getFireTrajectory(): FireYearData[] {
       SUM(CASE WHEN tipo = 'Despesa' AND is_imobiliario = 1 THEN montante ELSE 0 END) AS despesa_imob,
       SUM(CASE WHEN tipo = 'Receita' AND is_imobiliario = 1 AND categoria_normalizada LIKE '%Acertos%' THEN montante ELSE 0 END) AS acertos,
       SUM(CASE WHEN categoria_normalizada = 'R.Investimentos' THEN montante ELSE 0 END) AS investimentos,
-      SUM(CASE WHEN tipo = 'Despesa' AND is_imobiliario = 0 THEN montante ELSE 0 END) AS despesas_pessoais
+      SUM(CASE WHEN tipo = 'Despesa' AND is_imobiliario = 0 AND categoria_normalizada NOT IN (${CATEGORIAS_DESPESA_DE_CAPITAL}) THEN montante ELSE 0 END) AS despesas_pessoais
     FROM transactions
     WHERE is_poupanca = 0 AND is_controlo = 0
     GROUP BY ano

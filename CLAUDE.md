@@ -14,8 +14,9 @@ A especificação completa está em `docs/especificacao.md`. Em caso de dúvida,
 2. **Read-only**: nenhuma operação de escrita sobre a base de dados, nem UI que sugira edição.
 3. **Philosophy B** — separação do imobiliário (unidades 5L, 7D, 7E — arrendadas; PL é a habitação própria, nunca entra neste grupo):
    - Dashboard Visão Geral: totais **com** imobiliário (`include_imob = true`)
-   - KPIs Avançados / análise fina: **apenas pessoal** (excluir `is_imobiliario = 1`)
-   - Acertos de inquilinos = abatimento de despesa, nunca receita
+   - KPIs Avançados / análise fina (Análise): **apenas pessoal** (excluir `is_imobiliario = 1`)
+   - FIRE: **inclui** o rendimento líquido do imobiliário de arrendamento (rendas − despesas das unidades) no rendimento passivo — Philosophy B separa os fluxos do imobiliário dos KPIs de finanças pessoais para não os distorcer, não significa ignorá-lo sempre; o FIRE pergunta "o que é que os meus ativos geram", a mesma lógica do `include_imob=true` do Dashboard
+   - Acertos de inquilinos = abatimento de despesa, nunca receita, mesmo estando marcados `tipo='Receita'` nos dados — aplicar sempre que se somar receita/despesa do imobiliário (Análise, FIRE, futuro P&L por unidade)
    - P&L do imobiliário é análise separada, por unidade
    - No Património, distinguir sempre habitação própria (`property_config` com `tipo="Habitação Própria"`) dos imóveis de arrendamento (restantes)
 4. **Flags de schema a respeitar em todas as queries**:
@@ -46,6 +47,8 @@ A especificação completa está em `docs/especificacao.md`. Em caso de dúvida,
 - EVs em Portugal estão **isentos** de IUC (não é taxa reduzida)
 - **Imóveis e veículos não existem no `finance.db`** (confirmado por pesquisa exaustiva ao schema) — só o `finance_config.json` os tem, em `property_config` (imóveis, chave = código da unidade) e `patrimonio_config.veiculos` (lista). Fonte opcional: sem ela, o Património mostra "Sem dados de origem" nesses cartões, nunca um valor inventado.
 - **Nenhuma fonte de dados regista passivos** (crédito habitação, financiamento de veículos). O total combinado de ativos no Património é por isso sempre "ativos brutos", nunca "valor líquido" — não implementar um cálculo de valor líquido patrimonial sem antes confirmar onde vivem os passivos.
+- **Despesas de capital pontuais excluem-se das "despesas pessoais"** (Análise e FIRE, nunca do Dashboard): confirmado que `PL - Aquisição` é a compra da habitação própria (2016, evento único) — ver `src/data/queries/despesasDeCapital.ts`. Não confundir com `Volvo - Aquisição`, que são as prestações **mensais** do financiamento (`is_fixa=1`, `frequencia='Mensal'`) e continuam a contar como despesa de vida corrente — a exclusão é por categoria específica, nunca por padrão genérico no nome ("Aquisição").
+- **`R.Investimentos`** (juros/dividendos) só conta como rendimento passivo real quando `is_controlo=0`: confirmado que os registos `is_controlo=1` desta categoria são micro-lançamentos (média ~9 €, 184 linhas) muito diferentes dos ~33 registos reais (média ~230 €) — a flag `is_controlo` aplica-se normalmente, sem exceção.
 
 ## Fluxo de trabalho
 

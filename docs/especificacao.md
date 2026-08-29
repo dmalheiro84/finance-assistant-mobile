@@ -127,7 +127,7 @@ Todo o código já existe atrás de `VITE_AUTH_ENABLED` (ver §4). Quando ativad
 | **Análise** | Despesas por grupo/rubrica, fixo vs. variável (2018+), filtros de período |
 | **Património** | Ativos brutos: contas líquidas + investimentos (`finance.db`), imóveis e veículos (`finance_config.json`, opcional). Distingue habitação própria de imóveis de arrendamento. Sem passivos em nenhuma fonte — nunca apresentado como "valor líquido" |
 | **Investimentos** | Portfólio total (soma dos valores mais recentes na data global mais recente), estado ativo/terminado |
-| **FIRE** | Trajetória, taxa de cobertura de despesas por rendimento passivo (Barista FIRE) |
+| **FIRE** | Trajetória e taxa de cobertura de despesas pessoais por rendimento passivo (Barista FIRE). Rendimento passivo inclui o líquido do imobiliário de arrendamento (rendas − despesas, acertos de inquilinos como abatimento de despesa) + R.Investimentos — ao contrário da Análise, o FIRE não exclui o imobiliário (Philosophy B separa os fluxos para não distorcer os KPIs pessoais, não para os ignorar sempre) |
 
 Critérios de aceitação transversais (P0):
 - [ ] Todos os valores batem certo com o desktop para o mesmo `finance.db` (validação lado a lado)
