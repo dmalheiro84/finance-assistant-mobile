@@ -24,6 +24,19 @@ export function isDatabaseLoaded(): boolean {
   return currentDatabase !== null;
 }
 
+// Cabeçalho fixo de qualquer ficheiro SQLite ("SQLite format 3\0"),
+// comparado byte a byte para validar o ficheiro antes de o tentar abrir
+// — evita erros técnicos do sql.js quando o utilizador escolhe, por
+// engano, um ficheiro que não é o finance.db.
+const SQLITE_HEADER_BYTES = [
+  0x53, 0x51, 0x4c, 0x69, 0x74, 0x65, 0x20, 0x66, 0x6f, 0x72, 0x6d, 0x61, 0x74, 0x20, 0x33, 0x00,
+];
+
+export function isLikelySqliteFile(bytes: Uint8Array): boolean {
+  if (bytes.length < SQLITE_HEADER_BYTES.length) return false;
+  return SQLITE_HEADER_BYTES.every((byte, index) => bytes[index] === byte);
+}
+
 export function closeDatabase(): void {
   currentDatabase?.close();
   currentDatabase = null;
