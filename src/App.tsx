@@ -12,7 +12,7 @@ import { Dashboard } from './pages/Dashboard';
 import { Analise } from './pages/Analise';
 import { Patrimonio } from './pages/Patrimonio';
 import { Investimentos } from './pages/Investimentos';
-import { PlaceholderPage } from './pages/PlaceholderPage';
+import { Fire } from './pages/Fire';
 import { darkTheme, lightTheme } from './theme/theme';
 
 function AppShell() {
@@ -24,7 +24,7 @@ function AppShell() {
         <Route path="/analise" element={<Analise />} />
         <Route path="/patrimonio" element={<Patrimonio />} />
         <Route path="/investimentos" element={<Investimentos />} />
-        <Route path="/fire" element={<PlaceholderPage titulo="FIRE" />} />
+        <Route path="/fire" element={<Fire />} />
       </Routes>
       <BottomNav />
     </AuthGate>
