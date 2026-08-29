@@ -2,7 +2,6 @@ import {
   Accordion,
   AccordionDetails,
   AccordionSummary,
-  Alert,
   Box,
   Chip,
   Stack,
@@ -21,22 +20,14 @@ interface SchemaPanelProps {
 }
 
 /**
- * Mostra o schema real da base de dados carregada (tabelas + colunas),
- * para inspecionar antes de escrever queries de domínio — nunca assumir
- * nomes de tabelas/colunas (ver CLAUDE.md).
+ * Mostra o schema real da base de dados carregada (tabelas + colunas) —
+ * painel de diagnóstico, útil para escrever as queries dos próximos
+ * módulos (Análise, Património, Investimentos, FIRE) sem assumir nomes
+ * de tabelas/colunas (ver CLAUDE.md, regra 6).
  */
 export function SchemaPanel({ schema }: SchemaPanelProps) {
   return (
     <Box>
-      <Alert severity="info" sx={{ mb: 2 }}>
-        Os KPIs do Dashboard ainda não foram implementados: é preciso
-        confirmar os nomes reais de tabelas e colunas abaixo antes de
-        escrever as queries (ver CLAUDE.md, regra 6). Consulta esta lista e
-        indica quais as tabelas/colunas de transações, datas, valores e das
-        flags <code>is_poupanca</code>, <code>is_controlo</code> e{' '}
-        <code>is_imobiliario</code>.
-      </Alert>
-
       <Typography variant="h6" gutterBottom>
         Schema da base de dados ({schema.length} tabelas)
       </Typography>
