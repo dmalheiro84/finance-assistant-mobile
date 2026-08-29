@@ -3,6 +3,8 @@ import { CssBaseline, ThemeProvider, useMediaQuery } from '@mui/material';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { FinanceDataProvider } from './data/DataContext';
 import { ImportFileProvider } from './data/ImportFileContext';
+import { ConfigProvider } from './data/ConfigContext';
+import { ConfigFileProvider } from './data/ConfigFileContext';
 import { AuthGate } from './auth/AuthGate';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
@@ -39,7 +41,11 @@ export default function App() {
       <BrowserRouter basename={import.meta.env.BASE_URL}>
         <FinanceDataProvider>
           <ImportFileProvider>
-            <AppShell />
+            <ConfigProvider>
+              <ConfigFileProvider>
+                <AppShell />
+              </ConfigFileProvider>
+            </ConfigProvider>
           </ImportFileProvider>
         </FinanceDataProvider>
       </BrowserRouter>

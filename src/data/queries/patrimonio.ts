@@ -1,16 +1,7 @@
 import { query } from '../db';
+import type { FinanceConfig, PropertyConfig, VehicleConfig } from '../configFile';
 
 // Queries do módulo Património.
-//
-// ATENÇÃO — o schema real deste finance.db não tem qualquer fonte de
-// dados para "imóveis" nem "veículos" (Volvo EX30, Renault ESPACE): as
-// tabelas invest_product_types/invest_history/invest_transactions só
-// têm produtos financeiros (contas, depósitos, ações, fundos, cripto,
-// seguros); a tabela `transactions` só regista fluxos (receitas/
-// despesas), nunca o valor de um ativo. Pesquisa exaustiva por nome
-// (Volvo/Renault/EX30/SPACE/imóvel/casa/carro) não encontrou nada.
-// getRealEstateAndVehicles() devolve por isso null explícito — nunca
-// inventar um valor — e o UI mostra "sem dados de origem".
 //
 // "Contas líquidas" e "Investimentos" usam a mesma regra do desktop
 // (CLAUDE.md): soma dos valores mais recentes de cada produto na DATA
@@ -19,6 +10,16 @@ import { query } from '../db';
 // valor histórico — confirmado que é assim que ultimo_valor de
 // invest_product_types já se comporta). Exclui sempre as linhas-resumo
 // Portfolio/RAG acumulado/RAG do período.
+//
+// Imóveis e veículos não têm fonte de dados no finance.db (pesquisa
+// exaustiva por nome não encontrou nada) — vêm do finance_config.json,
+// uma segunda fonte de dados opcional (ver src/data/configFile.ts e
+// src/data/ConfigContext.tsx). summarizeRealEstateAndVehicles() recebe
+// esse config já validado; devolve null quando não foi importado.
+//
+// Nenhuma das duas fontes tem passivos (crédito habitação, financiamento
+// de veículos) — por isso o total combinado nunca deve ser chamado
+// "valor líquido": é sempre "ativos brutos" (ver Patrimonio.tsx).
 
 const LINHAS_RESUMO = `'Portfolio', 'RAG acumulado', 'RAG do período'`;
 const TIPOLOGIAS_LIQUIDAS = `'Disponibilidades DO', 'COFRE'`;
@@ -26,8 +27,8 @@ const TIPOLOGIAS_LIQUIDAS = `'Disponibilidades DO', 'COFRE'`;
 export interface FinancialNetWorth {
   contasLiquidas: number;
   investimentos: number;
-  /** Soma de contas + investimentos — NÃO inclui imóveis/veículos (sem dados de origem). */
-  valorLiquidoFinanceiro: number;
+  /** Soma de contas + investimentos — não inclui imóveis/veículos. */
+  totalFinanceiro: number;
   /** Data global mais recente do histórico de investimentos usada no cálculo. */
   dataReferencia: string | null;
 }
@@ -38,7 +39,7 @@ export function getFinancialNetWorth(): FinancialNetWorth {
   )[0]?.data ?? null;
 
   if (!dataReferencia) {
-    return { contasLiquidas: 0, investimentos: 0, valorLiquidoFinanceiro: 0, dataReferencia: null };
+    return { contasLiquidas: 0, investimentos: 0, totalFinanceiro: 0, dataReferencia: null };
   }
 
   const rows = query<{ contas: number | null; investimentos: number | null }>(
@@ -57,15 +58,36 @@ export function getFinancialNetWorth(): FinancialNetWorth {
   return {
     contasLiquidas,
     investimentos,
-    valorLiquidoFinanceiro: contasLiquidas + investimentos,
+    totalFinanceiro: contasLiquidas + investimentos,
     dataReferencia,
   };
 }
 
+export interface RealEstateAndVehicles {
+  /** Habitação própria (tipo="Habitação Própria" no finance_config.json) — nunca arrendada. */
+  habitacaoPropria: PropertyConfig[];
+  /** Imóveis de arrendamento (Philosophy B: unidades 5L/7D/7E e semelhantes). */
+  imoveisArrendamento: PropertyConfig[];
+  veiculos: VehicleConfig[];
+  totalImoveis: number;
+  totalVeiculos: number;
+}
+
 /**
- * Imóveis e veículos não têm fonte de dados no finance.db — devolve
- * sempre null (nunca um valor inventado). Ver nota no topo do ficheiro.
+ * Agrega o finance_config.json (já interpretado) em imóveis/veículos,
+ * distinguindo habitação própria de imóveis de arrendamento (Philosophy
+ * B). Devolve null quando o config não foi importado — nunca inventa
+ * valores.
  */
-export function getRealEstateAndVehicles(): null {
-  return null;
+export function summarizeRealEstateAndVehicles(
+  config: FinanceConfig | null,
+): RealEstateAndVehicles | null {
+  if (!config) return null;
+
+  const habitacaoPropria = config.imoveis.filter((imovel) => imovel.tipo === 'Habitação Própria');
+  const imoveisArrendamento = config.imoveis.filter((imovel) => imovel.tipo !== 'Habitação Própria');
+  const totalImoveis = config.imoveis.reduce((soma, imovel) => soma + imovel.valorMercado, 0);
+  const totalVeiculos = config.veiculos.reduce((soma, veiculo) => soma + veiculo.valor, 0);
+
+  return { habitacaoPropria, imoveisArrendamento, veiculos: config.veiculos, totalImoveis, totalVeiculos };
 }
