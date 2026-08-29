@@ -8,6 +8,8 @@ import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
 import { Dashboard } from './pages/Dashboard';
 import { Analise } from './pages/Analise';
+import { Patrimonio } from './pages/Patrimonio';
+import { Investimentos } from './pages/Investimentos';
 import { PlaceholderPage } from './pages/PlaceholderPage';
 import { darkTheme, lightTheme } from './theme/theme';
 
@@ -18,8 +20,8 @@ function AppShell() {
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/analise" element={<Analise />} />
-        <Route path="/patrimonio" element={<PlaceholderPage titulo="Património" />} />
-        <Route path="/investimentos" element={<PlaceholderPage titulo="Investimentos" />} />
+        <Route path="/patrimonio" element={<Patrimonio />} />
+        <Route path="/investimentos" element={<Investimentos />} />
         <Route path="/fire" element={<PlaceholderPage titulo="FIRE" />} />
       </Routes>
       <BottomNav />
