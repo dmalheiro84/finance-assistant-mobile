@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { CssBaseline, ThemeProvider, useMediaQuery } from '@mui/material';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { FinanceDataProvider } from './data/DataContext';
+import { ImportFileProvider } from './data/ImportFileContext';
 import { AuthGate } from './auth/AuthGate';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
@@ -34,7 +35,9 @@ export default function App() {
       <CssBaseline />
       <BrowserRouter basename={import.meta.env.BASE_URL}>
         <FinanceDataProvider>
-          <AppShell />
+          <ImportFileProvider>
+            <AppShell />
+          </ImportFileProvider>
         </FinanceDataProvider>
       </BrowserRouter>
     </ThemeProvider>
