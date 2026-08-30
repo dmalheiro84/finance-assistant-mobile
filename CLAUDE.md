@@ -8,6 +8,8 @@ A app desktop original (Python/Streamlit) continua a ser a única a **escrever**
 
 A especificação completa está em `docs/especificacao.md`. Em caso de dúvida, a especificação manda.
 
+**Fonte de verdade para todo o racional de negócio**: o repositório `dmalheiro84/FinanceAssistant` (privado, Python/Streamlit — a app desktop). Toda a fórmula, filtro ou exclusão implementada nesta app tem de replicar exatamente a lógica de `app/core/db.py` desse repositório — nunca uma reinterpretação própria, mesmo que pareça equivalente. Quando uma função do desktop não é usada em nenhuma view (código morto — confirmar sempre com `grep` antes de replicar), ou quando não existe nenhuma função equivalente no desktop para algo pedido, dizer isso explicitamente em vez de inventar uma metodologia nova. Objetivo: os dois lados mostrarem sempre o mesmo número para a mesma pergunta.
+
 ## Regras invioláveis
 
 1. **PT-PT em tudo**: interface, labels, mensagens de erro, comentários de código. Português europeu — "Actualizar/Atualizar dados", "Poupança", "Património"; nunca grafias ou vocabulário do PT-BR (ex.: "usuário" → "utilizador", "salvar" → "guardar").
@@ -52,6 +54,7 @@ A especificação completa está em `docs/especificacao.md`. Em caso de dúvida,
 
 ## Fluxo de trabalho
 
+- Antes de escrever uma query nova ou alterar uma existente: confirmar a fórmula exata na função correspondente de `app/core/db.py` do repo desktop (clone local, só leitura — nunca escrever lá)
 - Validar cada módulo lado a lado com a app desktop (mesmo `finance.db`) antes de o dar por concluído
 - Commits pequenos e frequentes, mensagens em PT-PT
 - `npm run build` tem de passar sem erros antes de qualquer commit
