@@ -1,10 +1,9 @@
 import { Box, Paper, Typography } from '@mui/material';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { formatCurrency } from '../theme/format';
-import type { InvestmentByType } from '../data/queries/investimentos';
 
 interface InvestmentByTypeChartProps {
-  data: InvestmentByType[];
+  data: { tipologia: string; valor: number }[];
 }
 
 /** Gráfico de barras: valor do portfólio por tipologia, do maior para o menor. */
