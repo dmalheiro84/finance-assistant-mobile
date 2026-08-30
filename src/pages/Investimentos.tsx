@@ -1,69 +1,93 @@
 import { useMemo, useState } from 'react';
-import {
-  Accordion,
-  AccordionDetails,
-  AccordionSummary,
-  Alert,
-  Box,
-  Chip,
-  Stack,
-  Table,
-  TableBody,
-  TableCell,
-  TableRow,
-  Typography,
-} from '@mui/material';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import { Alert, Autocomplete, Box, Chip, MenuItem, Stack, Tab, Tabs, TextField, Typography } from '@mui/material';
 import { useFinanceData } from '../data/DataContext';
 import {
-  getInvestmentPortfolio,
-  getPortfolioByType,
-  type InvestmentProduct,
+  getDisponibilidadesDO,
+  getInvestAvailableYears,
+  getInvestSummaryByTipologia,
+  getInvestTipologias,
+  getPortfolioTotalReal,
+  type InvestmentStatus,
 } from '../data/queries/investimentos';
-import { KpiCard } from '../components/KpiCard';
-import { InvestmentByTypeChart } from '../components/InvestmentByTypeChart';
-import { formatCurrency, formatDate } from '../theme/format';
+import { PortfolioTab } from './investimentos/PortfolioTab';
+import { EvolucaoTab } from './investimentos/EvolucaoTab';
+import { PorProdutoTab } from './investimentos/PorProdutoTab';
+import { InvestTransacoesTab } from './investimentos/InvestTransacoesTab';
+import { formatCurrency } from '../theme/format';
 
 /**
- * Investimentos: portfólio total (soma dos valores mais recentes de
- * cada produto na data global mais recente) e estado ativo/terminado
- * por produto. Ver src/data/queries/investimentos.ts.
+ * Investimentos: réplica dos 4 separadores de app/views/investments.py —
+ * Portfolio, Evolução, Por Produto, Transacções. Filtros globais
+ * (Estado/Tipologia/Pesquisa) partilhados por Portfolio e Por Produto,
+ * tal como no desktop — Evolução e Transacções têm a sua própria lógica
+ * independente. Ver src/data/queries/investimentos.ts para o racional
+ * exato de cada fórmula, incluindo a correção ao "Portfólio total" (antes
+ * incluía Disponibilidades DO por engano).
  */
 export function Investimentos() {
   const { schema } = useFinanceData();
-  const [mostrarTerminados, setMostrarTerminados] = useState(false);
+  const [tab, setTab] = useState(0);
+  const [estado, setEstado] = useState<'Todos' | InvestmentStatus>('Todos');
+  const [tipologiasSel, setTipologiasSel] = useState<string[]>([]);
+  const [pesquisa, setPesquisa] = useState('');
 
-  const { portfolio, porTipologia, erro } = useMemo(() => {
-    try {
-      return {
-        portfolio: getInvestmentPortfolio(),
-        porTipologia: getPortfolioByType(),
-        erro: null as string | null,
-      };
-    } catch (err) {
-      return {
-        portfolio: null,
-        porTipologia: [],
-        erro: err instanceof Error ? err.message : 'Não foi possível calcular os investimentos.',
-      };
-    }
-    // `schema` não é lido diretamente, mas recalcula quando uma base
-    // diferente é importada (as queries leem do motor sql.js global).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schema]);
+  const { tipologiasDisponiveis, anosDisponiveis, resumoBruto, portfolioReal, disponibilidadesDO, erro } =
+    useMemo(() => {
+      try {
+        return {
+          tipologiasDisponiveis: getInvestTipologias(),
+          anosDisponiveis: getInvestAvailableYears(),
+          resumoBruto: getInvestSummaryByTipologia(tipologiasSel.length > 0 ? tipologiasSel : undefined),
+          portfolioReal: getPortfolioTotalReal(),
+          disponibilidadesDO: getDisponibilidadesDO(),
+          erro: null as string | null,
+        };
+      } catch (err) {
+        return {
+          tipologiasDisponiveis: [],
+          anosDisponiveis: [],
+          resumoBruto: [],
+          portfolioReal: null,
+          disponibilidadesDO: [],
+          erro: err instanceof Error ? err.message : 'Não foi possível calcular os investimentos.',
+        };
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [schema, tipologiasSel]);
 
-  const produtosPorTipologia = useMemo(() => {
-    const mapa = new Map<string, InvestmentProduct[]>();
-    if (!portfolio) return mapa;
-    for (const produto of portfolio.produtos) {
-      if (!mostrarTerminados && produto.estado === 'terminado') continue;
-      const chave = produto.tipologia ?? '(sem tipologia)';
-      const lista = mapa.get(chave) ?? [];
-      lista.push(produto);
-      mapa.set(chave, lista);
+  const resumoFiltrado = useMemo(() => {
+    let lista = resumoBruto;
+    if (estado !== 'Todos') lista = lista.filter((r) => r.status === estado);
+    if (pesquisa) {
+      const termo = pesquisa.toLowerCase();
+      lista = lista.filter((r) => r.investimento.toLowerCase().includes(termo));
     }
-    return mapa;
-  }, [portfolio, mostrarTerminados]);
+    return lista;
+  }, [resumoBruto, estado, pesquisa]);
+
+  const totalDO = disponibilidadesDO.reduce((s, r) => s + r.valor, 0);
+
+  if (erro) {
+    return (
+      <Box p={2} pb={4}>
+        <Typography variant="h5" component="h2" fontWeight={700} gutterBottom>
+          Investimentos
+        </Typography>
+        <Alert severity="warning">{erro}</Alert>
+      </Box>
+    );
+  }
+
+  if (resumoBruto.length === 0) {
+    return (
+      <Box p={2} pb={4}>
+        <Typography variant="h5" component="h2" fontWeight={700} gutterBottom>
+          Investimentos
+        </Typography>
+        <Alert severity="info">Sem dados de investimento nesta base de dados.</Alert>
+      </Box>
+    );
+  }
 
   return (
     <Box p={2} pb={4}>
@@ -71,87 +95,83 @@ export function Investimentos() {
         Investimentos
       </Typography>
 
-      {erro && (
-        <Alert severity="warning" sx={{ mb: 3 }}>
-          Não foi possível calcular os investimentos desta base de dados: {erro}
+      <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap mb={1.5}>
+        <TextField
+          select
+          size="small"
+          label="Estado"
+          value={estado}
+          onChange={(e) => setEstado(e.target.value as 'Todos' | InvestmentStatus)}
+          sx={{ minWidth: 110 }}
+        >
+          <MenuItem value="Todos">Todos</MenuItem>
+          <MenuItem value="Ativo">Ativo</MenuItem>
+          <MenuItem value="Terminado">Terminado</MenuItem>
+        </TextField>
+        <Autocomplete
+          multiple
+          size="small"
+          options={tipologiasDisponiveis}
+          value={tipologiasSel}
+          onChange={(_, value) => setTipologiasSel(value)}
+          renderInput={(params) => <TextField {...params} label="Tipologia" placeholder="Todas" />}
+          sx={{ minWidth: 200, flex: 1 }}
+        />
+        <TextField
+          size="small"
+          label="Pesquisar produto"
+          placeholder="ex: NVIDIA, BTC…"
+          value={pesquisa}
+          onChange={(e) => setPesquisa(e.target.value)}
+          sx={{ minWidth: 180 }}
+        />
+      </Stack>
+
+      {totalDO > 0 && (
+        <Alert severity="success" sx={{ mb: 1.5 }} icon={false}>
+          💳 Disponibilidades em contas à ordem: <strong>{formatCurrency(totalDO)}</strong> — excluídas dos
+          gráficos de investimento.
         </Alert>
       )}
 
-      {portfolio && (
-        <>
-          {portfolio.dataReferencia && (
-            <Typography variant="caption" color="text.secondary" display="block" mb={2}>
-              Valores à data de {formatDate(new Date(portfolio.dataReferencia))} (data global mais
-              recente do histórico — não a data mais recente de cada produto individualmente).
-            </Typography>
-          )}
+      <Stack direction="row" spacing={1} mb={2}>
+        <Chip
+          label={`● ${resumoFiltrado.filter((r) => r.status === 'Ativo').length} Ativos`}
+          size="small"
+          color="success"
+          variant="outlined"
+        />
+        <Chip
+          label={`● ${resumoFiltrado.filter((r) => r.status === 'Terminado').length} Terminados`}
+          size="small"
+          variant="outlined"
+        />
+        <Typography variant="caption" color="text.secondary" alignSelf="center">
+          {resumoFiltrado.length} produtos filtrados
+        </Typography>
+      </Stack>
 
-          <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap mb={3}>
-            <KpiCard label="Portfólio total" value={formatCurrency(portfolio.total)} color="success.main" />
-            <KpiCard label="Produtos ativos" value={String(portfolio.totalAtivos)} />
-            <KpiCard label="Produtos terminados" value={String(portfolio.totalTerminados)} color="text.disabled" />
-          </Stack>
+      <Tabs
+        value={tab}
+        onChange={(_, value: number) => setTab(value)}
+        variant="scrollable"
+        scrollButtons="auto"
+        sx={{ mb: 2 }}
+      >
+        <Tab label="Portfolio" />
+        <Tab label="Evolução" />
+        <Tab label="Por Produto" />
+        <Tab label="Transacções" />
+      </Tabs>
 
-          <Typography variant="h6" component="h3" gutterBottom>
-            Por tipologia
-          </Typography>
-          <Box mb={3}>
-            <InvestmentByTypeChart data={porTipologia} />
-          </Box>
-
-          <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
-            <Typography variant="h6" component="h3">
-              Produtos
-            </Typography>
-            <Chip
-              label={mostrarTerminados ? 'A mostrar todos' : 'Só ativos'}
-              onClick={() => setMostrarTerminados((v) => !v)}
-              size="small"
-              variant="outlined"
-              clickable
-            />
-          </Stack>
-          <Stack spacing={1}>
-            {[...produtosPorTipologia.entries()].map(([tipologia, produtos]) => (
-              <Accordion key={tipologia} disableGutters>
-                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                  <Stack
-                    direction="row"
-                    spacing={1.5}
-                    alignItems="center"
-                    justifyContent="space-between"
-                    sx={{ width: '100%', pr: 1 }}
-                  >
-                    <Typography fontWeight={600}>{tipologia}</Typography>
-                    <Typography fontWeight={600}>
-                      {formatCurrency(produtos.reduce((soma, p) => soma + p.valor, 0))}
-                    </Typography>
-                  </Stack>
-                </AccordionSummary>
-                <AccordionDetails>
-                  <Table size="small">
-                    <TableBody>
-                      {produtos.map((produto) => (
-                        <TableRow key={produto.produto}>
-                          <TableCell>{produto.produto}</TableCell>
-                          <TableCell>
-                            <Chip
-                              label={produto.estado === 'ativo' ? 'Ativo' : 'Terminado'}
-                              size="small"
-                              color={produto.estado === 'ativo' ? 'success' : 'default'}
-                              variant="outlined"
-                            />
-                          </TableCell>
-                          <TableCell align="right">{formatCurrency(produto.valor)}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </AccordionDetails>
-              </Accordion>
-            ))}
-          </Stack>
-        </>
+      {tab === 0 && <PortfolioTab resumo={resumoFiltrado} portfolioReal={portfolioReal} />}
+      {tab === 1 && <EvolucaoTab />}
+      {tab === 2 && <PorProdutoTab resumo={resumoFiltrado} />}
+      {tab === 3 && (
+        <InvestTransacoesTab
+          produtosDisponiveis={resumoFiltrado.map((r) => r.investimento).sort()}
+          anosDisponiveis={anosDisponiveis}
+        />
       )}
     </Box>
   );
