@@ -456,3 +456,123 @@ export function getTopCategorias(ano: number, n = 10): TopCategoria[] {
       media: row.media ?? 0,
     }));
 }
+
+export interface Anomalia {
+  categoria: string;
+  grupo: string | null;
+  totalAtual: number;
+  mediaHistorica: number;
+  desvioPct: number;
+  desvioAbs: number;
+}
+
+/**
+ * Réplica de get_anomalies(year, threshold_pct) — categorias de despesa
+ * cujo total no ano se desvia da média dos anos anteriores acima de
+ * `thresholdPct`% e mais de 100€ em valor absoluto. `thresholdPct` vem de
+ * finance_config.json (anomaly_threshold_pct, default 25 — ver
+ * core/config.py DEFAULT_CONFIG no desktop).
+ */
+export function getAnomalias(ano: number, thresholdPct = 25): Anomalia[] {
+  const anosAnteriores = getAvailableYears().filter((y) => y < ano);
+  if (anosAnteriores.length === 0) return [];
+
+  const placeholders = anosAnteriores.map(() => '?').join(',');
+  const historico = query<{ categoria_normalizada: string | null; grupo_principal: string | null; media_hist: number | null }>(
+    `
+    SELECT categoria_normalizada, grupo_principal, AVG(total_anual) AS media_hist
+    FROM (
+      SELECT categoria_normalizada, grupo_principal, ano, SUM(montante) AS total_anual
+      FROM transactions
+      WHERE ano IN (${placeholders}) AND tipo = 'Despesa' AND is_poupanca = 0 AND is_controlo = 0
+      GROUP BY categoria_normalizada, grupo_principal, ano
+    )
+    GROUP BY categoria_normalizada, grupo_principal
+    `,
+    anosAnteriores,
+  );
+
+  const atual = query<{ categoria_normalizada: string | null; grupo_principal: string | null; total_curr: number | null }>(
+    `
+    SELECT categoria_normalizada, grupo_principal, SUM(montante) AS total_curr
+    FROM transactions
+    WHERE ano = ? AND tipo = 'Despesa' AND is_poupanca = 0 AND is_controlo = 0
+    GROUP BY categoria_normalizada, grupo_principal
+    `,
+    [ano],
+  );
+
+  if (historico.length === 0 || atual.length === 0) return [];
+
+  const chave = (categoria: string | null, grupo: string | null) => `${categoria ?? ''} ${grupo ?? ''}`;
+  const mediaPorChave = new Map(
+    historico.map((row) => [chave(row.categoria_normalizada, row.grupo_principal), row.media_hist ?? 0]),
+  );
+
+  const anomalias: Anomalia[] = [];
+  for (const row of atual) {
+    const mediaHist = mediaPorChave.get(chave(row.categoria_normalizada, row.grupo_principal));
+    // mediaHist === 0 seria SUM(montante)=0 num ano anterior — caso degenerado que
+    // o desktop também não trata (dividiria por zero); excluído aqui em vez de
+    // produzir Infinity/NaN na UI.
+    if (mediaHist === undefined || !row.categoria_normalizada || mediaHist === 0) continue;
+    const totalAtual = row.total_curr ?? 0;
+    const desvioAbs = totalAtual - mediaHist;
+    const desvioPct = (desvioAbs / mediaHist) * 100;
+    if (Math.abs(desvioPct) >= thresholdPct && Math.abs(desvioAbs) > 100) {
+      anomalias.push({
+        categoria: row.categoria_normalizada,
+        grupo: row.grupo_principal,
+        totalAtual,
+        mediaHistorica: mediaHist,
+        desvioPct,
+        desvioAbs,
+      });
+    }
+  }
+
+  return anomalias.sort((a, b) => b.desvioAbs - a.desvioAbs);
+}
+
+export interface BudgetVsActual {
+  grupo: string;
+  orcamento: number;
+  realizado: number;
+  desvio: number;
+  /** null quando não há orçamento definido para o grupo (orçamento = 0). */
+  pctExecucao: number | null;
+}
+
+/**
+ * Réplica de get_budgets_vs_actual(year, budgets) — despesas reais do ano
+ * por grupo principal vs orçamento anual (orçamento mensal de
+ * finance_config.json × 12). Sem filtro de is_imobiliario (inclui
+ * imobiliário, tal como o resto da Visão Geral).
+ */
+export function getBudgetsVsActual(ano: number, budgets: Record<string, number>): BudgetVsActual[] {
+  const rows = query<{ grupo_principal: string | null; realizado: number | null }>(
+    `
+    SELECT grupo_principal, SUM(montante) AS realizado
+    FROM transactions
+    WHERE ano = ? AND tipo = 'Despesa' AND is_poupanca = 0 AND is_controlo = 0
+    GROUP BY grupo_principal
+    ORDER BY realizado DESC
+    `,
+    [ano],
+  );
+
+  return rows
+    .filter((row) => row.grupo_principal)
+    .map((row) => {
+      const grupo = row.grupo_principal as string;
+      const realizado = row.realizado ?? 0;
+      const orcamento = (budgets[grupo] ?? 0) * 12;
+      return {
+        grupo,
+        orcamento,
+        realizado,
+        desvio: realizado - orcamento,
+        pctExecucao: orcamento > 0 ? (realizado / orcamento) * 100 : null,
+      };
+    });
+}

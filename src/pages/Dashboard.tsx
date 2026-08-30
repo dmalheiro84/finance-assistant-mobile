@@ -1,8 +1,11 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { Alert, Box, Button, Collapse, Stack, Typography } from '@mui/material';
+import { Alert, Box, Button, Collapse, Stack, Tab, Tabs, Typography } from '@mui/material';
 import { useFinanceData } from '../data/DataContext';
+import { useConfig } from '../data/ConfigContext';
 import {
   getAnnualTrend,
+  getAnomalias,
+  getBudgetsVsActual,
   getComparisonInfo,
   getDespesasBreakdown,
   getDespesasPorGrupo,
@@ -24,17 +27,27 @@ import { MonthlyEvolutionChart } from '../components/MonthlyEvolutionChart';
 import { DashboardGroupChart } from '../components/DashboardGroupChart';
 import { AnnualTrendChart } from '../components/AnnualTrendChart';
 import { TopCategoriesList } from '../components/TopCategoriesList';
+import { AnomaliesList } from '../components/AnomaliesList';
+import { BudgetVsActualList } from '../components/BudgetVsActualList';
 import { formatCurrency, formatMonthLabel, formatPercent } from '../theme/format';
 
 /**
- * Visão Geral: receitas/despesas/saldo do ano corrente + evolução
- * mensal. Inclui imobiliário (Philosophy B) e exclui sempre
- * is_poupanca=1 e is_controlo=1 — ver src/data/queries/dashboard.ts.
+ * Dashboard: réplica de dash_v1.py (desktop) — "Visão Geral" (receitas/
+ * despesas/saldo do ano corrente, breakdowns, evolução) e "Alertas &
+ * Orçamento" (anomalias vs média histórica, orçamento vs realizado).
+ * A tab "KPIs Avançados" do desktop é pessoal (exclui imobiliário) e vive
+ * antes em Análise, não aqui — ver Philosophy B em CLAUDE.md.
+ * Inclui sempre imobiliário; exclui sempre is_poupanca=1 e is_controlo=1
+ * — ver src/data/queries/dashboard.ts.
  */
 export function Dashboard() {
   const { schema } = useFinanceData();
+  const { config } = useConfig();
   const anoCorrente = new Date().getFullYear();
   const [showSchema, setShowSchema] = useState(false);
+  const [tab, setTab] = useState(0);
+
+  const thresholdAnomalias = config?.anomalyThresholdPct ?? 25;
 
   const {
     summary,
@@ -47,6 +60,8 @@ export function Dashboard() {
     grupoData,
     trendData,
     topCategorias,
+    anomalias,
+    budgetVsActual,
     erro,
   } = useMemo(() => {
     try {
@@ -67,6 +82,8 @@ export function Dashboard() {
         grupoData: getDespesasPorGrupo(anoCorrente),
         trendData: getAnnualTrend(),
         topCategorias: getTopCategorias(anoCorrente, 10),
+        anomalias: getAnomalias(anoCorrente, thresholdAnomalias),
+        budgetVsActual: getBudgetsVsActual(anoCorrente, config?.budgets ?? {}),
         erro: null as string | null,
       };
     } catch (err) {
@@ -81,21 +98,29 @@ export function Dashboard() {
         grupoData: [],
         trendData: [],
         topCategorias: [],
+        anomalias: [],
+        budgetVsActual: [],
         erro:
           err instanceof Error
             ? err.message
             : 'Não foi possível calcular os KPIs a partir desta base de dados.',
       };
     }
-    // Recalcula sempre que uma base diferente é carregada (schema muda).
+    // Recalcula sempre que uma base diferente é carregada (schema muda) ou
+    // a configuração (orçamentos/threshold) é actualizada.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schema, anoCorrente]);
+  }, [schema, anoCorrente, config, thresholdAnomalias]);
 
   return (
     <Box p={2} pb={4}>
       <Typography variant="h5" component="h2" fontWeight={700} gutterBottom>
-        Visão Geral
+        Dashboard
       </Typography>
+
+      <Tabs value={tab} onChange={(_, value: number) => setTab(value)} sx={{ mb: 2 }}>
+        <Tab label="Visão Geral" />
+        <Tab label="Alertas & Orçamento" />
+      </Tabs>
 
       {erro && (
         <Alert severity="warning" sx={{ mb: 3 }}>
@@ -103,7 +128,24 @@ export function Dashboard() {
         </Alert>
       )}
 
-      {summary && receitasBd && despesasBd && saldoBd && comparisonInfo && (
+      {tab === 1 && !erro && (
+        <Stack spacing={3} mb={3}>
+          <Box>
+            <Typography variant="h6" component="h3" gutterBottom>
+              Anomalias — {anoCorrente}
+            </Typography>
+            <AnomaliesList data={anomalias} thresholdPct={thresholdAnomalias} />
+          </Box>
+          <Box>
+            <Typography variant="h6" component="h3" gutterBottom>
+              Orçamento vs realizado — {anoCorrente}
+            </Typography>
+            <BudgetVsActualList data={budgetVsActual} />
+          </Box>
+        </Stack>
+      )}
+
+      {tab === 0 && summary && receitasBd && despesasBd && saldoBd && comparisonInfo && (
         <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap mb={3}>
           <KpiCard
             label={`Receitas ${anoCorrente}`}
@@ -153,33 +195,37 @@ export function Dashboard() {
         </Stack>
       )}
 
-      <Typography variant="h6" component="h3" gutterBottom>
-        Evolução mensal
-      </Typography>
-      <Box mb={3}>
-        <MonthlyEvolutionChart data={chartData} />
-      </Box>
+      {tab === 0 && !erro && (
+        <>
+          <Typography variant="h6" component="h3" gutterBottom>
+            Evolução mensal
+          </Typography>
+          <Box mb={3}>
+            <MonthlyEvolutionChart data={chartData} />
+          </Box>
 
-      <Typography variant="h6" component="h3" gutterBottom>
-        Despesas por grupo — {anoCorrente}
-      </Typography>
-      <Box mb={3}>
-        <DashboardGroupChart data={grupoData} />
-      </Box>
+          <Typography variant="h6" component="h3" gutterBottom>
+            Despesas por grupo — {anoCorrente}
+          </Typography>
+          <Box mb={3}>
+            <DashboardGroupChart data={grupoData} />
+          </Box>
 
-      <Typography variant="h6" component="h3" gutterBottom>
-        Evolução histórica
-      </Typography>
-      <Box mb={3}>
-        <AnnualTrendChart data={trendData} />
-      </Box>
+          <Typography variant="h6" component="h3" gutterBottom>
+            Evolução histórica
+          </Typography>
+          <Box mb={3}>
+            <AnnualTrendChart data={trendData} />
+          </Box>
 
-      <Typography variant="h6" component="h3" gutterBottom>
-        Top 10 categorias — {anoCorrente}
-      </Typography>
-      <Box mb={3}>
-        <TopCategoriesList data={topCategorias} />
-      </Box>
+          <Typography variant="h6" component="h3" gutterBottom>
+            Top 10 categorias — {anoCorrente}
+          </Typography>
+          <Box mb={3}>
+            <TopCategoriesList data={topCategorias} />
+          </Box>
+        </>
+      )}
 
       {schema && (
         <Box>

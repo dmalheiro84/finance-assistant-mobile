@@ -3,11 +3,12 @@
 // mercado de imóveis e veículos, que não vivem em lado nenhum do
 // finance.db (confirmado por pesquisa exaustiva ao schema).
 //
-// O ficheiro real tem mais campos (budgets, preferences,
-// anomaly_threshold_pct) que esta app não usa — extraímos só
-// property_config e patrimonio_config.veiculos, e ignoramos o resto.
-// Nunca assumimos que o ficheiro está bem formado: é escolhido
-// manualmente pelo utilizador, tal como o finance.db.
+// O ficheiro real tem mais campos (preferences) que esta app não usa —
+// extraímos property_config, patrimonio_config.veiculos, budgets e
+// anomaly_threshold_pct (usados nos Alertas & Orçamento do Dashboard,
+// tab "Alertas & Orçamento" de dash_v1.py) e ignoramos o resto. Nunca
+// assumimos que o ficheiro está bem formado: é escolhido manualmente
+// pelo utilizador, tal como o finance.db.
 
 export interface PropertyConfig {
   chave: string;
@@ -26,6 +27,10 @@ export interface VehicleConfig {
 export interface FinanceConfig {
   imoveis: PropertyConfig[];
   veiculos: VehicleConfig[];
+  /** Orçamento mensal (€) por grupo principal — chaves iguais às de DEFAULT_CONFIG no desktop. */
+  budgets: Record<string, number>;
+  /** % de desvio vs média histórica a partir do qual uma categoria é assinalada como anomalia. */
+  anomalyThresholdPct: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -64,6 +69,15 @@ function parseVeiculos(raw: unknown): VehicleConfig[] {
   return veiculos;
 }
 
+function parseBudgets(raw: unknown): Record<string, number> {
+  if (!isRecord(raw)) return {};
+  const budgets: Record<string, number> = {};
+  for (const [grupo, valor] of Object.entries(raw)) {
+    if (typeof valor === 'number') budgets[grupo] = valor;
+  }
+  return budgets;
+}
+
 /**
  * Interpreta o texto do finance_config.json. Lança um erro com mensagem
  * amigável em PT-PT se o ficheiro não for um JSON válido ou não tiver
@@ -84,9 +98,13 @@ export function parseFinanceConfig(text: string): FinanceConfig {
   }
 
   const patrimonioConfig = isRecord(parsed.patrimonio_config) ? parsed.patrimonio_config : {};
+  const anomalyThresholdPct =
+    typeof parsed.anomaly_threshold_pct === 'number' ? parsed.anomaly_threshold_pct : 25;
 
   return {
     imoveis: parsePropertyConfig(parsed.property_config),
     veiculos: parseVeiculos(patrimonioConfig.veiculos),
+    budgets: parseBudgets(parsed.budgets),
+    anomalyThresholdPct,
   };
 }
