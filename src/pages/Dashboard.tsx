@@ -29,16 +29,18 @@ import { AnnualTrendChart } from '../components/AnnualTrendChart';
 import { TopCategoriesList } from '../components/TopCategoriesList';
 import { AnomaliesList } from '../components/AnomaliesList';
 import { BudgetVsActualList } from '../components/BudgetVsActualList';
+import { KpisAvancadosTab } from './dashboard/KpisAvancadosTab';
 import { formatCurrency, formatMonthLabel, formatPercent } from '../theme/format';
 
 /**
- * Dashboard: réplica de dash_v1.py (desktop) — "Visão Geral" (receitas/
- * despesas/saldo do ano corrente, breakdowns, evolução) e "Alertas &
- * Orçamento" (anomalias vs média histórica, orçamento vs realizado).
- * A tab "KPIs Avançados" do desktop é pessoal (exclui imobiliário) e vive
- * antes em Análise, não aqui — ver Philosophy B em CLAUDE.md.
- * Inclui sempre imobiliário; exclui sempre is_poupanca=1 e is_controlo=1
- * — ver src/data/queries/dashboard.ts.
+ * Dashboard: réplica dos 3 separadores de dash_v1.py (desktop) — "Visão
+ * Geral" (receitas/despesas/saldo do ano corrente, breakdowns, evolução,
+ * inclui sempre imobiliário), "KPIs Avançados" (comportamento financeiro
+ * pessoal, exclui imobiliário — Philosophy B) e "Alertas & Orçamento"
+ * (anomalias vs média histórica, orçamento vs realizado). Fidelidade
+ * estrutural ao desktop: os 3 separadores vivem aqui, mesmo o "KPIs
+ * Avançados" sendo pessoal — é onde o desktop os tem, não os
+ * reorganizamos por Análise. Ver src/data/queries/dashboard.ts.
  */
 export function Dashboard() {
   const { schema } = useFinanceData();
@@ -119,6 +121,7 @@ export function Dashboard() {
 
       <Tabs value={tab} onChange={(_, value: number) => setTab(value)} sx={{ mb: 2 }}>
         <Tab label="Visão Geral" />
+        <Tab label="KPIs Avançados" />
         <Tab label="Alertas & Orçamento" />
       </Tabs>
 
@@ -128,7 +131,9 @@ export function Dashboard() {
         </Alert>
       )}
 
-      {tab === 1 && !erro && (
+      {tab === 1 && <KpisAvancadosTab ano={anoCorrente} />}
+
+      {tab === 2 && !erro && (
         <Stack spacing={3} mb={3}>
           <Box>
             <Typography variant="h6" component="h3" gutterBottom>

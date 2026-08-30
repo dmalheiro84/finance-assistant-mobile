@@ -576,3 +576,182 @@ export function getBudgetsVsActual(ano: number, budgets: Record<string, number>)
       };
     });
 }
+
+export interface AdvancedKpis {
+  receitasOp: number;
+  despesasCorrentes: number;
+  despesasTotais: number;
+  custoMensal: number;
+  mesesComDados: number;
+  saldoReal: number;
+  taxaPoupancaReal: number;
+  custosHabitacao: number;
+  racioHabitacao: number;
+  inflacaoPessoal: number | null;
+  inflacaoModo: 'ytd' | 'full' | null;
+}
+
+/**
+ * Réplica de get_advanced_kpis(year) — tab "🎯 KPIs Avançados" de
+ * dash_v1.py (2º separador do Dashboard no desktop, não da Análise —
+ * apesar de ser pessoal/Philosophy B, a estrutura real do desktop tem-no
+ * aqui, e replicamos a estrutura tal qual).
+ *
+ * IMPORTANTE — esta função tem a sua PRÓPRIA regra de exclusão de
+ * despesas pontuais, diferente da usada no FIRE/Análise: exclui one-offs
+ * do grupo "Empresas" acima de 10 000€ (NOT (grupo_principal='Empresas'
+ * AND montante > 10000)), não a categoria "PL - Aquisição" usada em
+ * despesasDeCapital.ts. São duas fórmulas desktop genuinamente
+ * diferentes — não fundidas numa só, replicada cada uma exatamente onde
+ * o desktop a usa. `autonomia_meses` é calculado no desktop mas nunca
+ * consumido por nenhuma view (confirmado por grep) — código morto, não
+ * replicado aqui.
+ */
+export function getAdvancedKpis(ano: number): AdvancedKpis {
+  const receitasOp =
+    query<{ v: number | null }>(
+      `
+      SELECT SUM(montante) AS v FROM transactions
+      WHERE ano = ? AND tipo = 'Receita' AND is_controlo = 0 AND is_poupanca = 0
+        AND is_imobiliario = 0 AND categoria_normalizada NOT LIKE 'R.Resgate%'
+      `,
+      [ano],
+    )[0]?.v ?? 0;
+
+  const despesasTotais =
+    query<{ v: number | null }>(
+      `
+      SELECT SUM(montante) AS v FROM transactions
+      WHERE ano = ? AND tipo = 'Despesa' AND is_poupanca = 0 AND is_controlo = 0 AND is_imobiliario = 0
+      `,
+      [ano],
+    )[0]?.v ?? 0;
+
+  const despesasCorrentes =
+    query<{ v: number | null }>(
+      `
+      SELECT SUM(montante) AS v FROM transactions
+      WHERE ano = ? AND tipo = 'Despesa' AND is_poupanca = 0 AND is_controlo = 0 AND is_imobiliario = 0
+        AND NOT (grupo_principal = 'Empresas' AND montante > 10000)
+      `,
+      [ano],
+    )[0]?.v ?? 0;
+
+  const custosHabitacao =
+    query<{ v: number | null }>(
+      `
+      SELECT SUM(montante) AS v FROM transactions
+      WHERE ano = ? AND grupo_principal = 'Habitação' AND tipo = 'Despesa' AND is_controlo = 0
+      `,
+      [ano],
+    )[0]?.v ?? 0;
+
+  const mesesComDados =
+    query<{ meses: number | null }>(
+      `
+      SELECT COUNT(DISTINCT mes) AS meses FROM transactions
+      WHERE ano = ? AND tipo = 'Despesa' AND is_poupanca = 0 AND is_controlo = 0 AND is_imobiliario = 0
+      `,
+      [ano],
+    )[0]?.meses ?? 1;
+
+  const custoMensal = mesesComDados > 0 ? despesasCorrentes / mesesComDados : 0;
+  const saldoReal = receitasOp - despesasCorrentes;
+  const taxaPoupancaReal = receitasOp > 0 ? (saldoReal / receitasOp) * 100 : 0;
+  const racioHabitacao = receitasOp > 0 ? (custosHabitacao / receitasOp) * 100 : 0;
+
+  let inflacaoPessoal: number | null = null;
+  let inflacaoModo: 'ytd' | 'full' | null = null;
+  const anosAnteriores = getAvailableYears().filter((y) => y < ano);
+  if (anosAnteriores.length > 0) {
+    const anoAnterior = anosAnteriores[0] as number; // getAvailableYears() é descendente — o 1º é o mais recente
+    const anoSistema = new Date().getFullYear();
+    let untilDatePrev: string | null = null;
+    if (ano === anoSistema) {
+      const maxData = query<{ md: string | null }>(
+        `SELECT MAX(data) AS md FROM transactions WHERE ano = ?`,
+        [ano],
+      )[0]?.md ?? null;
+      if (maxData) untilDatePrev = `${anoAnterior}${maxData.slice(4)}`;
+    }
+    const params: (number | string)[] = [anoAnterior];
+    let extraWhere = '';
+    if (untilDatePrev) {
+      extraWhere = ' AND data <= ?';
+      params.push(untilDatePrev);
+      inflacaoModo = 'ytd';
+    } else {
+      inflacaoModo = 'full';
+    }
+    const despPrev =
+      query<{ v: number | null }>(
+        `
+        SELECT SUM(montante) AS v FROM transactions
+        WHERE ano = ? AND tipo = 'Despesa' AND is_poupanca = 0 AND is_controlo = 0 AND is_imobiliario = 0
+          AND NOT (grupo_principal = 'Empresas' AND montante > 10000)${extraWhere}
+        `,
+        params,
+      )[0]?.v ?? 0;
+    if (despPrev > 0) inflacaoPessoal = ((despesasCorrentes - despPrev) / despPrev) * 100;
+  }
+
+  return {
+    receitasOp,
+    despesasCorrentes,
+    despesasTotais,
+    custoMensal,
+    mesesComDados,
+    saldoReal,
+    taxaPoupancaReal,
+    custosHabitacao,
+    racioHabitacao,
+    inflacaoPessoal,
+    inflacaoModo,
+  };
+}
+
+export interface FixedVsVariableKpi {
+  fixas: number;
+  variaveis: number;
+  total: number;
+  pctFixas: number;
+  /** false para 2015-2017 (dados legacy sem classificação fixa/variável fiável). */
+  anoClassificado: boolean;
+}
+
+/**
+ * Réplica de get_fixed_vs_variable(year) — usada só na tab "KPIs
+ * Avançados" do Dashboard (ano único). Diferente de qualquer exclusão de
+ * despesas de capital: aqui não há exclusão de PL-Aquisição nem de
+ * Empresas>10k, só is_imobiliario=0 — replicada tal qual o desktop.
+ */
+export function getFixedVsVariableKpi(ano: number): FixedVsVariableKpi {
+  const rows = query<{ fixas: number | null; variaveis: number | null; total: number | null; n: number | null }>(
+    `
+    SELECT
+      SUM(CASE WHEN is_fixa = 1 THEN montante ELSE 0 END) AS fixas,
+      SUM(CASE WHEN is_fixa = 0 THEN montante ELSE 0 END) AS variaveis,
+      SUM(montante) AS total,
+      COUNT(*) AS n
+    FROM transactions
+    WHERE ano = ? AND tipo = 'Despesa' AND is_poupanca = 0 AND is_controlo = 0 AND is_imobiliario = 0
+    `,
+    [ano],
+  );
+
+  if (!rows[0] || (rows[0].n ?? 0) === 0) {
+    return { fixas: 0, variaveis: 0, total: 0, pctFixas: 0, anoClassificado: ano >= 2018 };
+  }
+
+  const fixas = rows[0].fixas ?? 0;
+  const variaveis = rows[0].variaveis ?? 0;
+  const total = rows[0].total ?? 0;
+
+  return {
+    fixas,
+    variaveis,
+    total,
+    pctFixas: total > 0 ? (fixas / total) * 100 : 0,
+    anoClassificado: ano >= 2018,
+  };
+}
