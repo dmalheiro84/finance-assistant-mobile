@@ -5,7 +5,7 @@ import { getMonthlyEvolution, getYearSummary } from '../data/queries/dashboard';
 import { KpiCard } from '../components/KpiCard';
 import { SchemaPanel } from '../components/SchemaPanel';
 import { MonthlyEvolutionChart } from '../components/MonthlyEvolutionChart';
-import { formatCurrency, formatMonthLabel } from '../theme/format';
+import { formatCurrency, formatMonthLabel, formatPercent } from '../theme/format';
 
 /**
  * Visão Geral: receitas/despesas/saldo do ano corrente + evolução
@@ -74,7 +74,13 @@ export function Dashboard() {
             label={`Saldo ${anoCorrente}`}
             value={formatCurrency(summary.saldo)}
             color={summary.saldo >= 0 ? 'success.main' : 'error.main'}
-            tooltip="Receitas − Despesas do ano corrente."
+            tooltip="Receitas brutas − Despesas brutas do ano corrente (sem subtrair reembolsos/acertos)."
+          />
+          <KpiCard
+            label={`Taxa de poupança ${anoCorrente}`}
+            value={formatPercent(summary.taxaPoupanca)}
+            color={summary.taxaPoupanca >= 0 ? 'success.main' : 'error.main'}
+            tooltip="Saldo ÷ Receitas × 100."
           />
         </Stack>
       )}
