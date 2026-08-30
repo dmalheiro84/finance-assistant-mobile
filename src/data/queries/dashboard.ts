@@ -1,4 +1,5 @@
 import { query } from '../db';
+import { getAvailableYears } from './analise';
 
 // Queries do Dashboard (Visão Geral), sobre a tabela `transactions`.
 //
@@ -21,6 +22,13 @@ import { query } from '../db';
 //
 // Inclui sempre imobiliário (Dashboard = Visão Geral, include_imob=true).
 // Exclui sempre is_poupanca=1 e is_controlo=1.
+//
+// getReceitasBreakdown/getDespesasBreakdown/getSaldoBreakdown replicam
+// get_receitas_breakdown/get_despesas_breakdown/get_saldo_breakdown —
+// decomposição de cada card para tooltip (dashboard v1, tab "Visão Geral").
+// getComparisonInfo/getKpisDelta replicam get_comparison_info/
+// get_kpis_delta — comparação homóloga (YTD) quando o ano é o corrente do
+// sistema, ano completo vs ano completo nos restantes casos.
 
 export interface YearSummary {
   receitas: number;
@@ -39,8 +47,16 @@ export interface MonthlyEvolutionRow {
 const ACERTOS = `is_imobiliario = 1 AND categoria_normalizada LIKE '%Acertos%'`;
 const REEMBOLSOS = `categoria_normalizada = 'R.Reembolsos e devoluções'`;
 
-/** Receitas, despesas (líquidas) e saldo do ano indicado, para os KPIs da Visão Geral. */
-export function getYearSummary(ano: number): YearSummary {
+/**
+ * Réplica de get_kpis(year, until_date, include_imob=True). `untilDate`
+ * (formato 'AAAA-MM-DD') restringe a soma a `data <= untilDate` — usado nas
+ * comparações homólogas (YTD) de getComparisonInfo.
+ */
+function getKpisRaw(ano: number, untilDate?: string): YearSummary {
+  const whereExtra = untilDate ? ' AND data <= ?' : '';
+  const params: (number | string)[] = [ano];
+  if (untilDate) params.push(untilDate);
+
   const rows = query<{
     receitas_brutas: number | null;
     despesas_brutas: number | null;
@@ -54,9 +70,9 @@ export function getYearSummary(ano: number): YearSummary {
       SUM(CASE WHEN tipo = 'Receita' AND ${REEMBOLSOS} THEN montante ELSE 0 END) AS reembolsos,
       SUM(CASE WHEN tipo = 'Receita' AND ${ACERTOS} THEN montante ELSE 0 END) AS acertos
     FROM transactions
-    WHERE ano = ? AND is_poupanca = 0 AND is_controlo = 0
+    WHERE ano = ? AND is_poupanca = 0 AND is_controlo = 0${whereExtra}
     `,
-    [ano],
+    params,
   );
 
   const receitasBrutas = rows[0]?.receitas_brutas ?? 0;
@@ -73,6 +89,226 @@ export function getYearSummary(ano: number): YearSummary {
     despesas,
     saldo,
     taxaPoupanca: receitas > 0 ? (saldo / receitas) * 100 : 0,
+  };
+}
+
+/** Receitas, despesas (líquidas) e saldo do ano indicado, para os KPIs da Visão Geral. */
+export function getYearSummary(ano: number): YearSummary {
+  return getKpisRaw(ano);
+}
+
+export interface ReceitasBreakdown {
+  pessoal: number;
+  rendasPuras: number;
+  acertos: number;
+  resgates: number;
+  controlo: number;
+  /** = pessoal + rendasPuras — o que aparece no card Receitas. */
+  totalShow: number;
+  totalBruto: number;
+}
+
+/** Réplica de get_receitas_breakdown(year) — decomposição para o tooltip do card Receitas. */
+export function getReceitasBreakdown(ano: number): ReceitasBreakdown {
+  const rows = query<{
+    pessoal: number | null;
+    rendas_puras: number | null;
+    acertos: number | null;
+    resgates: number | null;
+    controlo: number | null;
+  }>(
+    `
+    SELECT
+      SUM(CASE WHEN is_controlo = 0 AND is_poupanca = 0 AND is_imobiliario = 0 THEN montante ELSE 0 END) AS pessoal,
+      SUM(CASE WHEN is_imobiliario = 1 AND is_controlo = 0 AND is_poupanca = 0
+                    AND categoria_normalizada NOT LIKE '%Acertos%' THEN montante ELSE 0 END) AS rendas_puras,
+      SUM(CASE WHEN is_imobiliario = 1 AND is_controlo = 0 AND is_poupanca = 0
+                    AND categoria_normalizada LIKE '%Acertos%' THEN montante ELSE 0 END) AS acertos,
+      SUM(CASE WHEN is_poupanca = 1 AND is_controlo = 0 THEN montante ELSE 0 END) AS resgates,
+      SUM(CASE WHEN is_controlo = 1 THEN montante ELSE 0 END) AS controlo
+    FROM transactions
+    WHERE ano = ? AND tipo = 'Receita'
+    `,
+    [ano],
+  );
+
+  const pessoal = rows[0]?.pessoal ?? 0;
+  const rendasPuras = rows[0]?.rendas_puras ?? 0;
+  const acertos = rows[0]?.acertos ?? 0;
+  const resgates = rows[0]?.resgates ?? 0;
+  const controlo = rows[0]?.controlo ?? 0;
+
+  return {
+    pessoal,
+    rendasPuras,
+    acertos,
+    resgates,
+    controlo,
+    totalShow: pessoal + rendasPuras,
+    totalBruto: pessoal + rendasPuras + acertos + resgates,
+  };
+}
+
+export interface DespesasBreakdown {
+  pessoalBruta: number;
+  pessoalLiquida: number;
+  imobBruta: number;
+  imobLiquida: number;
+  enviosPoupanca: number;
+  controlo: number;
+  reembolsos: number;
+  acertos: number;
+  /** = pessoalLiquida + imobLiquida — o que aparece no card Despesas. */
+  totalShow: number;
+  totalBruto: number;
+}
+
+/** Réplica de get_despesas_breakdown(year) — decomposição para o tooltip do card Despesas. */
+export function getDespesasBreakdown(ano: number): DespesasBreakdown {
+  const rows = query<{
+    pessoal_bruta: number | null;
+    imob_bruta: number | null;
+    envios_poupanca: number | null;
+    controlo: number | null;
+  }>(
+    `
+    SELECT
+      SUM(CASE WHEN is_controlo = 0 AND is_poupanca = 0 AND is_imobiliario = 0 THEN montante ELSE 0 END) AS pessoal_bruta,
+      SUM(CASE WHEN is_imobiliario = 1 AND is_controlo = 0 AND is_poupanca = 0 THEN montante ELSE 0 END) AS imob_bruta,
+      SUM(CASE WHEN is_poupanca = 1 AND is_controlo = 0 THEN montante ELSE 0 END) AS envios_poupanca,
+      SUM(CASE WHEN is_controlo = 1 THEN montante ELSE 0 END) AS controlo
+    FROM transactions
+    WHERE ano = ? AND tipo = 'Despesa'
+    `,
+    [ano],
+  );
+
+  const reembolsosRows = query<{ reembolsos: number | null }>(
+    `
+    SELECT SUM(montante) AS reembolsos FROM transactions
+    WHERE ano = ? AND tipo = 'Receita' AND is_controlo = 0 AND ${REEMBOLSOS}
+    `,
+    [ano],
+  );
+
+  const acertosRows = query<{ acertos: number | null }>(
+    `
+    SELECT SUM(montante) AS acertos FROM transactions
+    WHERE ano = ? AND tipo = 'Receita' AND is_controlo = 0 AND ${ACERTOS}
+    `,
+    [ano],
+  );
+
+  const pessoalBruta = rows[0]?.pessoal_bruta ?? 0;
+  const imobBruta = rows[0]?.imob_bruta ?? 0;
+  const enviosPoupanca = rows[0]?.envios_poupanca ?? 0;
+  const controlo = rows[0]?.controlo ?? 0;
+  const reembolsos = reembolsosRows[0]?.reembolsos ?? 0;
+  const acertos = acertosRows[0]?.acertos ?? 0;
+  const imobLiquida = imobBruta - acertos;
+  const pessoalLiquida = pessoalBruta - reembolsos;
+
+  return {
+    pessoalBruta,
+    pessoalLiquida,
+    imobBruta,
+    imobLiquida,
+    enviosPoupanca,
+    controlo,
+    reembolsos,
+    acertos,
+    totalShow: pessoalLiquida + imobLiquida,
+    totalBruto: pessoalBruta + imobBruta + enviosPoupanca,
+  };
+}
+
+export interface SaldoBreakdown {
+  saldoPessoal: number;
+  rendasPuras: number;
+  acertos: number;
+  imobBruta: number;
+  imobLiquida: number;
+  saldoImob: number;
+  saldoTotal: number;
+}
+
+/** Réplica de get_saldo_breakdown(year) — decomposição para o tooltip do card Saldo. */
+export function getSaldoBreakdown(ano: number): SaldoBreakdown {
+  const rec = getReceitasBreakdown(ano);
+  const dsp = getDespesasBreakdown(ano);
+  const saldoPessoal = rec.pessoal - dsp.pessoalBruta;
+  const saldoImob = rec.rendasPuras + rec.acertos - dsp.imobBruta;
+
+  return {
+    saldoPessoal,
+    rendasPuras: rec.rendasPuras,
+    acertos: rec.acertos,
+    imobBruta: dsp.imobBruta,
+    imobLiquida: dsp.imobLiquida,
+    saldoImob,
+    saldoTotal: saldoPessoal + saldoImob,
+  };
+}
+
+export type ComparisonMode = 'no_prev' | 'ytd' | 'full';
+
+export interface ComparisonInfo {
+  mode: ComparisonMode;
+  /** Data (AAAA-MM-DD) até à qual o ano corrente tem dados, só em modo 'ytd'. */
+  untilDate: string | null;
+  prevFull: YearSummary | null;
+  prevYtd: YearSummary | null;
+}
+
+/**
+ * Réplica de get_comparison_info(year, include_imob=True): decide se a
+ * comparação com o ano anterior é homóloga (YTD, quando `ano` é o ano
+ * corrente do sistema) ou ano completo vs ano completo.
+ */
+export function getComparisonInfo(ano: number): ComparisonInfo {
+  const anosDisponiveis = getAvailableYears();
+  if (!anosDisponiveis.includes(ano - 1)) {
+    return { mode: 'no_prev', untilDate: null, prevFull: null, prevYtd: null };
+  }
+
+  const prevFull = getKpisRaw(ano - 1);
+  const anoSistema = new Date().getFullYear();
+
+  if (ano === anoSistema) {
+    const maxRows = query<{ md: string | null }>(
+      `SELECT MAX(data) AS md FROM transactions WHERE ano = ?`,
+      [ano],
+    );
+    const maxData = maxRows[0]?.md ?? null;
+    if (maxData) {
+      const prevUntil = `${ano - 1}${maxData.slice(4)}`;
+      const prevYtd = getKpisRaw(ano - 1, prevUntil);
+      return { mode: 'ytd', untilDate: maxData, prevFull, prevYtd };
+    }
+    return { mode: 'no_prev', untilDate: null, prevFull, prevYtd: null };
+  }
+
+  return { mode: 'full', untilDate: null, prevFull, prevYtd: null };
+}
+
+export interface KpisDelta {
+  receitas: number;
+  despesas: number;
+  saldo: number;
+  taxaPoupanca: number;
+}
+
+/** Réplica de get_kpis_delta(year, include_imob=True). `null` quando não há ano anterior. */
+export function getKpisDelta(ano: number): KpisDelta | null {
+  const curr = getYearSummary(ano);
+  const info = getComparisonInfo(ano);
+  if (info.mode === 'no_prev') return null;
+  const prev = info.mode === 'ytd' ? info.prevYtd! : info.prevFull!;
+  return {
+    receitas: curr.receitas - prev.receitas,
+    despesas: curr.despesas - prev.despesas,
+    saldo: curr.saldo - prev.saldo,
+    taxaPoupanca: curr.taxaPoupanca - prev.taxaPoupanca,
   };
 }
 
@@ -100,4 +336,123 @@ export function getMonthlyEvolution(ano: number): MonthlyEvolutionRow[] {
     receitas: row.receitas ?? 0,
     despesas: row.despesas ?? 0,
   }));
+}
+
+export interface GrupoDespesa {
+  grupo: string;
+  total: number;
+  n: number;
+}
+
+/**
+ * Réplica de get_by_group(year) — despesas por grupo principal do ano
+ * indicado, para o donut "Despesas por Grupo" da Visão Geral. Sem filtro
+ * de is_imobiliario (inclui sempre imobiliário, tal como o resto do
+ * Dashboard); exclui poupança e controlo.
+ */
+export function getDespesasPorGrupo(ano: number): GrupoDespesa[] {
+  const rows = query<{ grupo_principal: string | null; total: number | null; n: number | null }>(
+    `
+    SELECT grupo_principal, SUM(montante) AS total, COUNT(*) AS n
+    FROM transactions
+    WHERE ano = ? AND tipo = 'Despesa' AND is_poupanca = 0 AND is_controlo = 0
+    GROUP BY grupo_principal
+    ORDER BY total DESC
+    `,
+    [ano],
+  );
+
+  return rows
+    .filter((row) => row.grupo_principal)
+    .map((row) => ({
+      grupo: row.grupo_principal as string,
+      total: row.total ?? 0,
+      n: row.n ?? 0,
+    }));
+}
+
+export interface AnnualTrendRow {
+  ano: number;
+  receitas: number;
+  despesas: number;
+  saldo: number;
+}
+
+/**
+ * Réplica de get_annual_trend(include_imob=True) — evolução anual de
+ * receitas/despesas/saldo, para o gráfico de área "Evolução Histórica".
+ * Mesma lógica de netting de getYearSummary, agrupada por ano.
+ */
+export function getAnnualTrend(): AnnualTrendRow[] {
+  const rows = query<{ ano: number; receitas: number | null; despesas: number | null; saldo: number | null }>(
+    `
+    SELECT
+      ano,
+      SUM(CASE WHEN tipo = 'Receita' AND is_poupanca = 0 AND is_controlo = 0
+                    AND NOT (${ACERTOS}) THEN montante ELSE 0 END) AS receitas,
+      SUM(CASE WHEN tipo = 'Despesa' AND is_poupanca = 0 AND is_controlo = 0 THEN montante ELSE 0 END)
+        - SUM(CASE WHEN tipo = 'Receita' AND is_poupanca = 0 AND is_controlo = 0
+                        AND ${REEMBOLSOS} THEN montante ELSE 0 END)
+        - SUM(CASE WHEN tipo = 'Receita' AND is_poupanca = 0 AND is_controlo = 0
+                        AND ${ACERTOS} THEN montante ELSE 0 END) AS despesas,
+      SUM(CASE WHEN tipo = 'Receita' AND is_poupanca = 0 AND is_controlo = 0 THEN montante
+               WHEN tipo = 'Despesa' AND is_poupanca = 0 AND is_controlo = 0 THEN -montante
+               ELSE 0 END) AS saldo
+    FROM transactions
+    WHERE ano IS NOT NULL
+    GROUP BY ano
+    ORDER BY ano
+    `,
+  );
+
+  return rows.map((row) => ({
+    ano: row.ano,
+    receitas: row.receitas ?? 0,
+    despesas: row.despesas ?? 0,
+    saldo: row.saldo ?? 0,
+  }));
+}
+
+export interface TopCategoria {
+  categoria: string;
+  grupo: string | null;
+  total: number;
+  n: number;
+  media: number;
+}
+
+/**
+ * Réplica de get_top_categories(year, n=10, tipo="Despesas") — maiores
+ * categorias de despesa do ano indicado. Sem filtro de is_imobiliario
+ * (tal como o resto da Visão Geral); exclui poupança e controlo.
+ */
+export function getTopCategorias(ano: number, n = 10): TopCategoria[] {
+  const rows = query<{
+    categoria_normalizada: string | null;
+    grupo_principal: string | null;
+    total: number | null;
+    n: number | null;
+    media: number | null;
+  }>(
+    `
+    SELECT categoria_normalizada, grupo_principal,
+           SUM(montante) AS total, COUNT(*) AS n, AVG(montante) AS media
+    FROM transactions
+    WHERE ano = ? AND tipo = 'Despesa' AND is_poupanca = 0 AND is_controlo = 0
+    GROUP BY categoria_normalizada, grupo_principal
+    ORDER BY total DESC
+    LIMIT ?
+    `,
+    [ano, n],
+  );
+
+  return rows
+    .filter((row) => row.categoria_normalizada)
+    .map((row) => ({
+      categoria: row.categoria_normalizada as string,
+      grupo: row.grupo_principal,
+      total: row.total ?? 0,
+      n: row.n ?? 0,
+      media: row.media ?? 0,
+    }));
 }
